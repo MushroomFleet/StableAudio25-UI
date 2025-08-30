@@ -1,13 +1,27 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Download, Play, Pause, Music, Loader2, AlertCircle, RefreshCw, Clock } from 'lucide-react';
+import { Download, Play, Pause, Music, Loader2, AlertCircle, RefreshCw, Clock, Upload, FileAudio } from 'lucide-react';
 import axios from 'axios';
 
 const API_BASE_URL = '/api';
 
 function App() {
+  // Tab state
+  const [activeTab, setActiveTab] = useState('text2audio');
+  
+  // Text-to-Audio state
   const [prompt, setPrompt] = useState('');
   const [duration, setDuration] = useState(20);
   const [outputFormat, setOutputFormat] = useState('mp3');
+  
+  // Audio-to-Audio state
+  const [a2aPrompt, setA2aPrompt] = useState('');
+  const [a2aDuration, setA2aDuration] = useState(20);
+  const [a2aOutputFormat, setA2aOutputFormat] = useState('mp3');
+  const [strength, setStrength] = useState(0.7);
+  const [uploadedFile, setUploadedFile] = useState(null);
+  const [uploadedFileInfo, setUploadedFileInfo] = useState(null);
+  
+  // Shared state
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
@@ -65,6 +79,52 @@ function App() {
     return date.toLocaleString();
   };
 
+  // Handle file upload for audio-to-audio
+  const handleFileUpload = (event) => {
+    const file = event.target.files[0];
+    if (!file) return;
+
+    // Validate file type
+    if (!file.type.match(/^audio\/(mp3|mpeg|wav)$/)) {
+      setError('Please upload an MP3 or WAV file');
+      return;
+    }
+
+    // Validate file size (50MB max)
+    if (file.size > 50 * 1024 * 1024) {
+      setError('File size must be less than 50MB');
+      return;
+    }
+
+    setUploadedFile(file);
+    setError('');
+
+    // Get audio duration
+    const audio = new Audio();
+    audio.onloadedmetadata = () => {
+      const duration = Math.round(audio.duration);
+      
+      // Validate duration (6-190 seconds)
+      if (duration < 6 || duration > 190) {
+        setError('Audio file must be between 6 and 190 seconds long');
+        setUploadedFile(null);
+        setUploadedFileInfo(null);
+        return;
+      }
+
+      setUploadedFileInfo({
+        duration: duration,
+        size: (file.size / (1024 * 1024)).toFixed(1) + 'MB'
+      });
+    };
+    audio.onerror = () => {
+      setError('Unable to load audio file. Please try a different file.');
+      setUploadedFile(null);
+      setUploadedFileInfo(null);
+    };
+    audio.src = URL.createObjectURL(file);
+  };
+
   const handleGenerate = async () => {
     if (!prompt.trim()) {
       setError('Please enter a prompt');
@@ -100,6 +160,57 @@ function App() {
     }
   };
 
+  const handleA2AGenerate = async () => {
+    if (!a2aPrompt.trim()) {
+      setError('Please enter a transformation description');
+      return;
+    }
+
+    if (!uploadedFile) {
+      setError('Please upload an audio file');
+      return;
+    }
+
+    setIsLoading(true);
+    setError('');
+    setSuccessMessage('');
+
+    try {
+      const formData = new FormData();
+      formData.append('prompt', a2aPrompt.trim());
+      formData.append('audio', uploadedFile);
+      formData.append('duration', parseInt(a2aDuration));
+      formData.append('output_format', a2aOutputFormat);
+      formData.append('strength', strength);
+      formData.append('model', 'stable-audio-2.5');
+
+      const response = await axios.post(`${API_BASE_URL}/audio/generate-a2a`, formData, {
+        headers: {
+          'Content-Type': 'multipart/form-data',
+        },
+      });
+
+      if (response.data.success) {
+        setSuccessMessage('Audio transformed successfully! Check the gallery below.');
+        // Clear form
+        setA2aPrompt('');
+        setUploadedFile(null);
+        setUploadedFileInfo(null);
+        // Auto-refresh gallery after successful generation
+        fetchAudioFiles();
+      }
+    } catch (err) {
+      console.error('A2A Generation error:', err);
+      setError(
+        err.response?.data?.error || 
+        err.message || 
+        'Failed to transform audio'
+      );
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   return (
     <div className="bg-gradient">
       <div className="container">
@@ -111,101 +222,309 @@ function App() {
             </h1>
           </div>
           <p className="subtitle">
-            Generate high-quality audio from text prompts
+            Generate and transform high-quality audio using text prompts and audio inputs
           </p>
         </div>
 
         <div className="card">
           <div className="space-y-6">
-            {/* Prompt Input */}
-            <div className="form-group">
-              <label htmlFor="prompt" className="form-label">
-                Audio Description
-              </label>
-              <textarea
-                id="prompt"
-                value={prompt}
-                onChange={(e) => setPrompt(e.target.value)}
-                placeholder="Describe the audio you want to generate... e.g., 'A cheerful acoustic guitar melody with soft drums'"
-                className="form-textarea"
-                rows="4"
-                disabled={isLoading}
-              />
+            {/* Tab Navigation */}
+            <div className="flex border-b border-gray-200">
+              <button
+                onClick={() => setActiveTab('text2audio')}
+                className={`px-4 py-2 text-sm font-medium border-b-2 ${
+                  activeTab === 'text2audio'
+                    ? 'border-blue-500 text-blue-600'
+                    : 'border-transparent text-gray-500 hover:text-gray-700'
+                }`}
+              >
+                <Music className="icon-sm inline mr-1" />
+                Text to Audio
+              </button>
+              <button
+                onClick={() => setActiveTab('audio2audio')}
+                className={`px-4 py-2 text-sm font-medium border-b-2 ml-4 ${
+                  activeTab === 'audio2audio'
+                    ? 'border-blue-500 text-blue-600'
+                    : 'border-transparent text-gray-500 hover:text-gray-700'
+                }`}
+              >
+                <FileAudio className="icon-sm inline mr-1" />
+                Audio to Audio
+              </button>
             </div>
 
-            {/* Duration Input */}
-            <div className="form-group">
-              <label htmlFor="duration" className="form-label">
-                Duration (seconds)
-              </label>
-              <input
-                id="duration"
-                type="number"
-                value={duration}
-                onChange={(e) => setDuration(Math.max(1, Math.min(120, parseInt(e.target.value) || 20)))}
-                className="form-input"
-                min="1"
-                max="120"
-                disabled={isLoading}
-              />
-              <p className="text-sm text-gray-500 mt-1">Range: 1-120 seconds</p>
-            </div>
+            {/* Text to Audio Form */}
+            {activeTab === 'text2audio' && (
+              <div className="space-y-6">
+                {/* Prompt Input */}
+                <div className="form-group">
+                  <label htmlFor="prompt" className="form-label">
+                    Audio Description
+                  </label>
+                  <textarea
+                    id="prompt"
+                    value={prompt}
+                    onChange={(e) => setPrompt(e.target.value)}
+                    placeholder="Describe the audio you want to generate... e.g., 'A cheerful acoustic guitar melody with soft drums'"
+                    className="form-textarea"
+                    rows="4"
+                    disabled={isLoading}
+                  />
+                </div>
 
-            {/* Output Format Selection */}
-            <div className="form-group">
-              <label className="form-label">
-                Output Format
-              </label>
-              <div className="flex space-x-6">
-                <label className="flex items-center">
+                {/* Duration Input */}
+                <div className="form-group">
+                  <label htmlFor="duration" className="form-label">
+                    Duration (seconds)
+                  </label>
                   <input
-                    type="radio"
-                    name="outputFormat"
-                    value="mp3"
-                    checked={outputFormat === 'mp3'}
-                    onChange={(e) => setOutputFormat(e.target.value)}
-                    disabled={isLoading}
+                    id="duration"
+                    type="number"
+                    value={duration}
+                    onChange={(e) => setDuration(Math.max(1, Math.min(120, parseInt(e.target.value) || 20)))}
                     className="form-input"
-                    style={{width: 'auto', marginRight: '0.5rem'}}
-                  />
-                  <span className="text-sm" style={{fontWeight: 500}}>MP3</span>
-                  <span className="text-sm text-gray-500 ml-2">(Smaller file size)</span>
-                </label>
-                <label className="flex items-center">
-                  <input
-                    type="radio"
-                    name="outputFormat"
-                    value="wav"
-                    checked={outputFormat === 'wav'}
-                    onChange={(e) => setOutputFormat(e.target.value)}
+                    min="1"
+                    max="120"
                     disabled={isLoading}
-                    className="form-input"
-                    style={{width: 'auto', marginRight: '0.5rem'}}
                   />
-                  <span className="text-sm" style={{fontWeight: 500}}>WAV</span>
-                  <span className="text-sm text-gray-500 ml-2">(Higher quality)</span>
-                </label>
+                  <p className="text-sm text-gray-500 mt-1">Range: 1-120 seconds</p>
+                </div>
+
+                {/* Output Format Selection */}
+                <div className="form-group">
+                  <label className="form-label">
+                    Output Format
+                  </label>
+                  <div className="flex space-x-6">
+                    <label className="flex items-center">
+                      <input
+                        type="radio"
+                        name="outputFormat"
+                        value="mp3"
+                        checked={outputFormat === 'mp3'}
+                        onChange={(e) => setOutputFormat(e.target.value)}
+                        disabled={isLoading}
+                        className="form-input"
+                        style={{width: 'auto', marginRight: '0.5rem'}}
+                      />
+                      <span className="text-sm" style={{fontWeight: 500}}>MP3</span>
+                      <span className="text-sm text-gray-500 ml-2">(Smaller file size)</span>
+                    </label>
+                    <label className="flex items-center">
+                      <input
+                        type="radio"
+                        name="outputFormat"
+                        value="wav"
+                        checked={outputFormat === 'wav'}
+                        onChange={(e) => setOutputFormat(e.target.value)}
+                        disabled={isLoading}
+                        className="form-input"
+                        style={{width: 'auto', marginRight: '0.5rem'}}
+                      />
+                      <span className="text-sm" style={{fontWeight: 500}}>WAV</span>
+                      <span className="text-sm text-gray-500 ml-2">(Higher quality)</span>
+                    </label>
+                  </div>
+                </div>
+
+                {/* Generate Button */}
+                <button
+                  onClick={handleGenerate}
+                  disabled={isLoading || !prompt.trim()}
+                  className="btn-primary"
+                >
+                  {isLoading ? (
+                    <>
+                      <Loader2 className="icon-sm animate-spin" />
+                      Generating Audio...
+                    </>
+                  ) : (
+                    <>
+                      <Music className="icon-sm" />
+                      Generate Audio
+                    </>
+                  )}
+                </button>
               </div>
-            </div>
+            )}
 
-            {/* Generate Button */}
-            <button
-              onClick={handleGenerate}
-              disabled={isLoading || !prompt.trim()}
-              className="btn-primary"
-            >
-              {isLoading ? (
-                <>
-                  <Loader2 className="icon-sm animate-spin" />
-                  Generating Audio...
-                </>
-              ) : (
-                <>
-                  <Music className="icon-sm" />
-                  Generate Audio
-                </>
-              )}
-            </button>
+            {/* Audio to Audio Form */}
+            {activeTab === 'audio2audio' && (
+              <div className="space-y-6">
+                {/* File Upload */}
+                <div className="form-group">
+                  <label className="form-label">
+                    Upload Audio File
+                  </label>
+                  <div
+                    className={`border-2 border-dashed border-gray-300 rounded-lg p-6 text-center hover:border-gray-400 transition-colors ${
+                      isLoading ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'
+                    }`}
+                    onClick={() => document.getElementById('audioFileInput').click()}
+                  >
+                    {uploadedFile ? (
+                      <div className="space-y-2">
+                        <FileAudio className="icon text-green-500 mx-auto" />
+                        <p className="text-sm font-medium text-gray-900">{uploadedFile.name}</p>
+                        {uploadedFileInfo && (
+                          <p className="text-xs text-gray-500">
+                            Duration: {uploadedFileInfo.duration}s | Size: {uploadedFileInfo.size}
+                          </p>
+                        )}
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setUploadedFile(null);
+                            setUploadedFileInfo(null);
+                          }}
+                          className="text-xs text-red-600 hover:text-red-700"
+                        >
+                          Remove file
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="space-y-2">
+                        <Upload className="icon text-gray-400 mx-auto" />
+                        <p className="text-sm text-gray-600">
+                          Click to upload or drag and drop
+                        </p>
+                        <p className="text-xs text-gray-500">
+                          MP3 or WAV files (6-190 seconds, max 50MB)
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                  <input
+                    id="audioFileInput"
+                    type="file"
+                    accept=".mp3,.wav,audio/mpeg,audio/wav"
+                    onChange={handleFileUpload}
+                    className="hidden"
+                    disabled={isLoading}
+                  />
+                </div>
+
+                {/* Prompt Input */}
+                <div className="form-group">
+                  <label htmlFor="a2aPrompt" className="form-label">
+                    Transformation Description
+                  </label>
+                  <textarea
+                    id="a2aPrompt"
+                    value={a2aPrompt}
+                    onChange={(e) => setA2aPrompt(e.target.value)}
+                    placeholder="Describe how you want to transform the audio... e.g., 'Make it sound more upbeat with electronic elements'"
+                    className="form-textarea"
+                    rows="4"
+                    disabled={isLoading}
+                  />
+                </div>
+
+                {/* Strength Parameter */}
+                <div className="form-group">
+                  <label htmlFor="strength" className="form-label">
+                    Transformation Strength
+                  </label>
+                  <div className="space-y-2">
+                    <input
+                      id="strength"
+                      type="range"
+                      min="0.01"
+                      max="1"
+                      step="0.01"
+                      value={strength}
+                      onChange={(e) => setStrength(parseFloat(e.target.value))}
+                      className="w-full"
+                      disabled={isLoading}
+                    />
+                    <div className="flex justify-between text-sm text-gray-500">
+                      <span>Subtle (0.01)</span>
+                      <span className="font-medium">Current: {strength}</span>
+                      <span>Complete (1.0)</span>
+                    </div>
+                  </div>
+                  <p className="text-sm text-gray-500 mt-1">
+                    Lower values preserve more of the original audio, higher values create more transformation
+                  </p>
+                </div>
+
+                {/* Duration Input */}
+                <div className="form-group">
+                  <label htmlFor="a2aDuration" className="form-label">
+                    Duration (seconds)
+                  </label>
+                  <input
+                    id="a2aDuration"
+                    type="number"
+                    value={a2aDuration}
+                    onChange={(e) => setA2aDuration(Math.max(1, Math.min(190, parseInt(e.target.value) || 20)))}
+                    className="form-input"
+                    min="1"
+                    max="190"
+                    disabled={isLoading}
+                  />
+                  <p className="text-sm text-gray-500 mt-1">Range: 1-190 seconds</p>
+                </div>
+
+                {/* Output Format Selection */}
+                <div className="form-group">
+                  <label className="form-label">
+                    Output Format
+                  </label>
+                  <div className="flex space-x-6">
+                    <label className="flex items-center">
+                      <input
+                        type="radio"
+                        name="a2aOutputFormat"
+                        value="mp3"
+                        checked={a2aOutputFormat === 'mp3'}
+                        onChange={(e) => setA2aOutputFormat(e.target.value)}
+                        disabled={isLoading}
+                        className="form-input"
+                        style={{width: 'auto', marginRight: '0.5rem'}}
+                      />
+                      <span className="text-sm" style={{fontWeight: 500}}>MP3</span>
+                      <span className="text-sm text-gray-500 ml-2">(Smaller file size)</span>
+                    </label>
+                    <label className="flex items-center">
+                      <input
+                        type="radio"
+                        name="a2aOutputFormat"
+                        value="wav"
+                        checked={a2aOutputFormat === 'wav'}
+                        onChange={(e) => setA2aOutputFormat(e.target.value)}
+                        disabled={isLoading}
+                        className="form-input"
+                        style={{width: 'auto', marginRight: '0.5rem'}}
+                      />
+                      <span className="text-sm" style={{fontWeight: 500}}>WAV</span>
+                      <span className="text-sm text-gray-500 ml-2">(Higher quality)</span>
+                    </label>
+                  </div>
+                </div>
+
+                {/* Generate Button */}
+                <button
+                  onClick={handleA2AGenerate}
+                  disabled={isLoading || !a2aPrompt.trim() || !uploadedFile}
+                  className="btn-primary"
+                >
+                  {isLoading ? (
+                    <>
+                      <Loader2 className="icon-sm animate-spin" />
+                      Transforming Audio...
+                    </>
+                  ) : (
+                    <>
+                      <FileAudio className="icon-sm" />
+                      Transform Audio
+                    </>
+                  )}
+                </button>
+              </div>
+            )}
 
             {/* Error Display */}
             {error && (
@@ -289,13 +608,43 @@ function App() {
                           </button>
                           
                           <div className="flex-1">
-                            <p style={{fontWeight: 500, color: '#374151', marginBottom: '0.5rem'}}>{file.filename}</p>
-                            
+                            <div className="flex items-center mb-2">
+                              <p style={{fontWeight: 500, color: '#374151', marginRight: '0.5rem'}}>{file.filename}</p>
+                              {/* Type Badge */}
+                              <span className={`px-2 py-1 text-xs font-medium rounded-full ${
+                                file.type === 'audio-to-audio' 
+                                  ? 'bg-purple-100 text-purple-800' 
+                                  : 'bg-blue-100 text-blue-800'
+                              }`}>
+                                {file.type === 'audio-to-audio' ? 'A2A' : 'T2A'}
+                              </span>
+                            </div>
+
                             {/* Prompt Display */}
                             {file.prompt && (
                               <div className="mb-2">
-                                <p style={{fontSize: '0.875rem', fontWeight: 500, color: '#4b5563', marginBottom: '0.25rem'}}>Prompt:</p>
+                                <p style={{fontSize: '0.875rem', fontWeight: 500, color: '#4b5563', marginBottom: '0.25rem'}}>
+                                  {file.type === 'audio-to-audio' ? 'Transformation:' : 'Prompt:'}
+                                </p>
                                 <p style={{fontSize: '0.875rem', color: '#6b7280', fontStyle: 'italic', lineHeight: '1.4'}}>{file.prompt}</p>
+                              </div>
+                            )}
+
+                            {/* Audio-to-Audio specific metadata */}
+                            {file.type === 'audio-to-audio' && (
+                              <div className="mb-2">
+                                {file.source_filename && (
+                                  <div className="mb-1">
+                                    <p style={{fontSize: '0.875rem', fontWeight: 500, color: '#4b5563', marginBottom: '0.25rem'}}>Source Audio:</p>
+                                    <p style={{fontSize: '0.875rem', color: '#6b7280'}}>{file.source_filename}</p>
+                                  </div>
+                                )}
+                                {file.strength && (
+                                  <div>
+                                    <span style={{fontSize: '0.875rem', fontWeight: 500, color: '#4b5563'}}>Strength:</span>
+                                    <span style={{fontSize: '0.875rem', color: '#6b7280', marginLeft: '0.25rem'}}>{file.strength}</span>
+                                  </div>
+                                )}
                               </div>
                             )}
                             
@@ -344,7 +693,7 @@ function App() {
                           galleryAudioRefs.current[file.filename] = el;
                         }
                       }}
-                      src={`/${file.filename}`}
+                      src={`http://localhost:5000/${file.filename}`}
                       onEnded={() => setCurrentlyPlaying(null)}
                       preload="metadata"
                     />
