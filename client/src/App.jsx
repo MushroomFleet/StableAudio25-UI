@@ -1084,13 +1084,31 @@ function App() {
                       </div>
                       
                       <button
-                        onClick={() => {
-                          const link = document.createElement('a');
-                          link.href = `${API_BASE_URL}${file.url}`;
-                          link.download = file.filename;
-                          document.body.appendChild(link);
-                          link.click();
-                          document.body.removeChild(link);
+                        onClick={async () => {
+                          // Check if we're in Electron environment
+                          if (window.electronAPI && window.electronAPI.downloadFile) {
+                            try {
+                              const result = await window.electronAPI.downloadFile(file.url, file.filename);
+                              if (result.success) {
+                                setSuccessMessage(`File saved successfully!`);
+                              } else if (result.canceled) {
+                                // User canceled the save dialog - do nothing
+                              } else {
+                                setError(`Download failed: ${result.error || 'Unknown error'}`);
+                              }
+                            } catch (error) {
+                              console.error('Download error:', error);
+                              setError(`Download failed: ${error.message}`);
+                            }
+                          } else {
+                            // Fallback to web download method
+                            const link = document.createElement('a');
+                            link.href = `${API_BASE_URL}${file.url}`;
+                            link.download = file.filename;
+                            document.body.appendChild(link);
+                            link.click();
+                            document.body.removeChild(link);
+                          }
                         }}
                         className="btn-primary"
                         style={{width: 'auto', marginLeft: '1rem'}}
@@ -1107,7 +1125,7 @@ function App() {
                           galleryAudioRefs.current[file.filename] = el;
                         }
                       }}
-                      src={`http://localhost:5000/${file.filename}`}
+                      src={file.url}
                       onEnded={() => setCurrentlyPlaying(null)}
                       preload="metadata"
                     />
