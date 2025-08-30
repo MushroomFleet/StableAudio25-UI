@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Download, Play, Pause, Music, Loader2, AlertCircle, RefreshCw, Clock, Upload, FileAudio } from 'lucide-react';
+import { Download, Play, Pause, Music, Loader2, AlertCircle, RefreshCw, Clock, Upload, FileAudio, Scissors } from 'lucide-react';
 import axios from 'axios';
 
 const API_BASE_URL = '/api';
@@ -20,6 +20,17 @@ function App() {
   const [strength, setStrength] = useState(0.7);
   const [uploadedFile, setUploadedFile] = useState(null);
   const [uploadedFileInfo, setUploadedFileInfo] = useState(null);
+  
+  // Audio Inpainting state
+  const [inpaintPrompt, setInpaintPrompt] = useState('');
+  const [inpaintDuration, setInpaintDuration] = useState(190);
+  const [inpaintOutputFormat, setInpaintOutputFormat] = useState('mp3');
+  const [maskStart, setMaskStart] = useState(30);
+  const [maskEnd, setMaskEnd] = useState(190);
+  const [seed, setSeed] = useState(0);
+  const [steps, setSteps] = useState(8);
+  const [inpaintUploadedFile, setInpaintUploadedFile] = useState(null);
+  const [inpaintUploadedFileInfo, setInpaintUploadedFileInfo] = useState(null);
   
   // Shared state
   const [isLoading, setIsLoading] = useState(false);
@@ -125,6 +136,57 @@ function App() {
     audio.src = URL.createObjectURL(file);
   };
 
+  // Handle file upload for inpainting
+  const handleInpaintFileUpload = (event) => {
+    const file = event.target.files[0];
+    if (!file) return;
+
+    // Validate file type
+    if (!file.type.match(/^audio\/(mp3|mpeg|wav)$/)) {
+      setError('Please upload an MP3 or WAV file');
+      return;
+    }
+
+    // Validate file size (50MB max)
+    if (file.size > 50 * 1024 * 1024) {
+      setError('File size must be less than 50MB');
+      return;
+    }
+
+    setInpaintUploadedFile(file);
+    setError('');
+
+    // Get audio duration
+    const audio = new Audio();
+    audio.onloadedmetadata = () => {
+      const duration = Math.round(audio.duration);
+      
+      // Validate duration (6-190 seconds)
+      if (duration < 6 || duration > 190) {
+        setError('Audio file must be between 6 and 190 seconds long');
+        setInpaintUploadedFile(null);
+        setInpaintUploadedFileInfo(null);
+        return;
+      }
+
+      setInpaintUploadedFileInfo({
+        duration: duration,
+        size: (file.size / (1024 * 1024)).toFixed(1) + 'MB'
+      });
+
+      // Auto-adjust mask end to file duration if needed
+      if (maskEnd > duration) {
+        setMaskEnd(duration);
+      }
+    };
+    audio.onerror = () => {
+      setError('Unable to load audio file. Please try a different file.');
+      setInpaintUploadedFile(null);
+      setInpaintUploadedFileInfo(null);
+    };
+    audio.src = URL.createObjectURL(file);
+  };
+
   const handleGenerate = async () => {
     if (!prompt.trim()) {
       setError('Please enter a prompt');
@@ -211,6 +273,71 @@ function App() {
     }
   };
 
+  const handleInpaintGenerate = async () => {
+    if (!inpaintPrompt.trim()) {
+      setError('Please enter an inpainting description');
+      return;
+    }
+
+    if (!inpaintUploadedFile) {
+      setError('Please upload an audio file');
+      return;
+    }
+
+    // Validate mask times
+    if (maskStart >= maskEnd) {
+      setError('Mask start time must be less than mask end time');
+      return;
+    }
+
+    if (inpaintUploadedFileInfo && maskEnd > inpaintUploadedFileInfo.duration) {
+      setError('Mask end time cannot exceed audio file duration');
+      return;
+    }
+
+    setIsLoading(true);
+    setError('');
+    setSuccessMessage('');
+
+    try {
+      const formData = new FormData();
+      formData.append('prompt', inpaintPrompt.trim());
+      formData.append('audio', inpaintUploadedFile);
+      formData.append('duration', parseInt(inpaintDuration));
+      formData.append('output_format', inpaintOutputFormat);
+      formData.append('mask_start', maskStart);
+      formData.append('mask_end', maskEnd);
+      formData.append('seed', parseInt(seed));
+      formData.append('steps', parseInt(steps));
+      formData.append('model', 'stable-audio-2.5');
+
+      const response = await axios.post(`${API_BASE_URL}/audio/generate-inpaint`, formData, {
+        headers: {
+          'Content-Type': 'multipart/form-data',
+        },
+      });
+
+      if (response.data.success) {
+        setSuccessMessage('Audio inpainted successfully! Check the gallery below.');
+        // Clear form
+        setInpaintPrompt('');
+        setInpaintUploadedFile(null);
+        setInpaintUploadedFileInfo(null);
+        // Auto-refresh gallery after successful generation
+        fetchAudioFiles();
+      }
+    } catch (err) {
+      console.error('Inpainting error:', err);
+      setError(
+        err.response?.data?.error || 
+        err.message || 
+        'Failed to inpaint audio'
+      );
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   return (
     <div className="bg-gradient">
       <div className="container">
@@ -251,6 +378,17 @@ function App() {
               >
                 <FileAudio className="icon-sm inline mr-1" />
                 Audio to Audio
+              </button>
+              <button
+                onClick={() => setActiveTab('inpainting')}
+                className={`px-4 py-2 text-sm font-medium border-b-2 ml-4 ${
+                  activeTab === 'inpainting'
+                    ? 'border-blue-500 text-blue-600'
+                    : 'border-transparent text-gray-500 hover:text-gray-700'
+                }`}
+              >
+                <Scissors className="icon-sm inline mr-1" />
+                Audio Inpainting
               </button>
             </div>
 
@@ -526,6 +664,247 @@ function App() {
               </div>
             )}
 
+            {/* Audio Inpainting Form */}
+            {activeTab === 'inpainting' && (
+              <div className="space-y-6">
+                {/* File Upload */}
+                <div className="form-group">
+                  <label className="form-label">
+                    Upload Audio File
+                  </label>
+                  <div
+                    className={`border-2 border-dashed border-gray-300 rounded-lg p-6 text-center hover:border-gray-400 transition-colors ${
+                      isLoading ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'
+                    }`}
+                    onClick={() => document.getElementById('inpaintAudioFileInput').click()}
+                  >
+                    {inpaintUploadedFile ? (
+                      <div className="space-y-2">
+                        <FileAudio className="icon text-green-500 mx-auto" />
+                        <p className="text-sm font-medium text-gray-900">{inpaintUploadedFile.name}</p>
+                        {inpaintUploadedFileInfo && (
+                          <p className="text-xs text-gray-500">
+                            Duration: {inpaintUploadedFileInfo.duration}s | Size: {inpaintUploadedFileInfo.size}
+                          </p>
+                        )}
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setInpaintUploadedFile(null);
+                            setInpaintUploadedFileInfo(null);
+                          }}
+                          className="text-xs text-red-600 hover:text-red-700"
+                        >
+                          Remove file
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="space-y-2">
+                        <Upload className="icon text-gray-400 mx-auto" />
+                        <p className="text-sm text-gray-600">
+                          Click to upload or drag and drop
+                        </p>
+                        <p className="text-xs text-gray-500">
+                          MP3 or WAV files (6-190 seconds, max 50MB)
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                  <input
+                    id="inpaintAudioFileInput"
+                    type="file"
+                    accept=".mp3,.wav,audio/mpeg,audio/wav"
+                    onChange={handleInpaintFileUpload}
+                    className="hidden"
+                    disabled={isLoading}
+                  />
+                </div>
+
+                {/* Prompt Input */}
+                <div className="form-group">
+                  <label htmlFor="inpaintPrompt" className="form-label">
+                    Inpainting Description
+                  </label>
+                  <textarea
+                    id="inpaintPrompt"
+                    value={inpaintPrompt}
+                    onChange={(e) => setInpaintPrompt(e.target.value)}
+                    placeholder="Describe what you want to replace in the selected time range... e.g., 'A solo violin melody' or 'Ambient nature sounds'"
+                    className="form-textarea"
+                    rows="4"
+                    disabled={isLoading}
+                  />
+                </div>
+
+                {/* Mask Time Range */}
+                <div className="form-group">
+                  <label className="form-label">
+                    Inpainting Time Range
+                  </label>
+                  <div className="space-y-4">
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <label htmlFor="maskStart" className="text-sm font-medium text-gray-700 block mb-1">
+                          Start Time (seconds)
+                        </label>
+                        <input
+                          id="maskStart"
+                          type="number"
+                          value={maskStart}
+                          onChange={(e) => setMaskStart(Math.max(0, Math.min(190, parseFloat(e.target.value) || 0)))}
+                          className="form-input"
+                          min="0"
+                          max="190"
+                          step="0.1"
+                          disabled={isLoading}
+                        />
+                      </div>
+                      <div>
+                        <label htmlFor="maskEnd" className="text-sm font-medium text-gray-700 block mb-1">
+                          End Time (seconds)
+                        </label>
+                        <input
+                          id="maskEnd"
+                          type="number"
+                          value={maskEnd}
+                          onChange={(e) => setMaskEnd(Math.max(0, Math.min(190, parseFloat(e.target.value) || 190)))}
+                          className="form-input"
+                          min="0"
+                          max="190"
+                          step="0.1"
+                          disabled={isLoading}
+                        />
+                      </div>
+                    </div>
+                    <div className="text-sm text-gray-500">
+                      <p>Selected range: {maskStart}s - {maskEnd}s ({(maskEnd - maskStart).toFixed(1)}s duration)</p>
+                      {inpaintUploadedFileInfo && (
+                        <p>Audio file duration: {inpaintUploadedFileInfo.duration}s</p>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Advanced Parameters */}
+                <div className="form-group">
+                  <label className="form-label">
+                    Advanced Parameters
+                  </label>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label htmlFor="seed" className="text-sm font-medium text-gray-700 block mb-1">
+                        Seed (0 = random)
+                      </label>
+                      <input
+                        id="seed"
+                        type="number"
+                        value={seed}
+                        onChange={(e) => setSeed(Math.max(0, Math.min(4294967294, parseInt(e.target.value) || 0)))}
+                        className="form-input"
+                        min="0"
+                        max="4294967294"
+                        disabled={isLoading}
+                      />
+                    </div>
+                    <div>
+                      <label htmlFor="steps" className="text-sm font-medium text-gray-700 block mb-1">
+                        Sampling Steps
+                      </label>
+                      <input
+                        id="steps"
+                        type="number"
+                        value={steps}
+                        onChange={(e) => setSteps(Math.max(4, Math.min(8, parseInt(e.target.value) || 8)))}
+                        className="form-input"
+                        min="4"
+                        max="8"
+                        disabled={isLoading}
+                      />
+                    </div>
+                  </div>
+                  <div className="text-sm text-gray-500 mt-2">
+                    <p>Seed: Controls randomness (0 for random generation)</p>
+                    <p>Steps: Number of denoising steps (4-8, higher = better quality but slower)</p>
+                  </div>
+                </div>
+
+                {/* Duration Input */}
+                <div className="form-group">
+                  <label htmlFor="inpaintDuration" className="form-label">
+                    Duration (seconds)
+                  </label>
+                  <input
+                    id="inpaintDuration"
+                    type="number"
+                    value={inpaintDuration}
+                    onChange={(e) => setInpaintDuration(Math.max(1, Math.min(190, parseInt(e.target.value) || 190)))}
+                    className="form-input"
+                    min="1"
+                    max="190"
+                    disabled={isLoading}
+                  />
+                  <p className="text-sm text-gray-500 mt-1">Range: 1-190 seconds</p>
+                </div>
+
+                {/* Output Format Selection */}
+                <div className="form-group">
+                  <label className="form-label">
+                    Output Format
+                  </label>
+                  <div className="flex space-x-6">
+                    <label className="flex items-center">
+                      <input
+                        type="radio"
+                        name="inpaintOutputFormat"
+                        value="mp3"
+                        checked={inpaintOutputFormat === 'mp3'}
+                        onChange={(e) => setInpaintOutputFormat(e.target.value)}
+                        disabled={isLoading}
+                        className="form-input"
+                        style={{width: 'auto', marginRight: '0.5rem'}}
+                      />
+                      <span className="text-sm" style={{fontWeight: 500}}>MP3</span>
+                      <span className="text-sm text-gray-500 ml-2">(Smaller file size)</span>
+                    </label>
+                    <label className="flex items-center">
+                      <input
+                        type="radio"
+                        name="inpaintOutputFormat"
+                        value="wav"
+                        checked={inpaintOutputFormat === 'wav'}
+                        onChange={(e) => setInpaintOutputFormat(e.target.value)}
+                        disabled={isLoading}
+                        className="form-input"
+                        style={{width: 'auto', marginRight: '0.5rem'}}
+                      />
+                      <span className="text-sm" style={{fontWeight: 500}}>WAV</span>
+                      <span className="text-sm text-gray-500 ml-2">(Higher quality)</span>
+                    </label>
+                  </div>
+                </div>
+
+                {/* Generate Button */}
+                <button
+                  onClick={handleInpaintGenerate}
+                  disabled={isLoading || !inpaintPrompt.trim() || !inpaintUploadedFile}
+                  className="btn-primary"
+                >
+                  {isLoading ? (
+                    <>
+                      <Loader2 className="icon-sm animate-spin" />
+                      Inpainting Audio...
+                    </>
+                  ) : (
+                    <>
+                      <Scissors className="icon-sm" />
+                      Inpaint Audio
+                    </>
+                  )}
+                </button>
+              </div>
+            )}
+
             {/* Error Display */}
             {error && (
               <div className="alert-error">
@@ -613,10 +992,12 @@ function App() {
                               {/* Type Badge */}
                               <span className={`px-2 py-1 text-xs font-medium rounded-full ${
                                 file.type === 'audio-to-audio' 
-                                  ? 'bg-purple-100 text-purple-800' 
+                                  ? 'bg-purple-100 text-purple-800'
+                                  : file.type === 'audio-inpainting'
+                                  ? 'bg-orange-100 text-orange-800'
                                   : 'bg-blue-100 text-blue-800'
                               }`}>
-                                {file.type === 'audio-to-audio' ? 'A2A' : 'T2A'}
+                                {file.type === 'audio-to-audio' ? 'A2A' : file.type === 'audio-inpainting' ? 'INP' : 'T2A'}
                               </span>
                             </div>
 
@@ -624,7 +1005,8 @@ function App() {
                             {file.prompt && (
                               <div className="mb-2">
                                 <p style={{fontSize: '0.875rem', fontWeight: 500, color: '#4b5563', marginBottom: '0.25rem'}}>
-                                  {file.type === 'audio-to-audio' ? 'Transformation:' : 'Prompt:'}
+                                  {file.type === 'audio-to-audio' ? 'Transformation:' : 
+                                   file.type === 'audio-inpainting' ? 'Inpainting:' : 'Prompt:'}
                                 </p>
                                 <p style={{fontSize: '0.875rem', color: '#6b7280', fontStyle: 'italic', lineHeight: '1.4'}}>{file.prompt}</p>
                               </div>
@@ -643,6 +1025,38 @@ function App() {
                                   <div>
                                     <span style={{fontSize: '0.875rem', fontWeight: 500, color: '#4b5563'}}>Strength:</span>
                                     <span style={{fontSize: '0.875rem', color: '#6b7280', marginLeft: '0.25rem'}}>{file.strength}</span>
+                                  </div>
+                                )}
+                              </div>
+                            )}
+
+                            {/* Audio Inpainting specific metadata */}
+                            {file.type === 'audio-inpainting' && (
+                              <div className="mb-2">
+                                {file.source_filename && (
+                                  <div className="mb-1">
+                                    <p style={{fontSize: '0.875rem', fontWeight: 500, color: '#4b5563', marginBottom: '0.25rem'}}>Source Audio:</p>
+                                    <p style={{fontSize: '0.875rem', color: '#6b7280'}}>{file.source_filename}</p>
+                                  </div>
+                                )}
+                                {(file.mask_start !== undefined && file.mask_end !== undefined) && (
+                                  <div className="mb-1">
+                                    <span style={{fontSize: '0.875rem', fontWeight: 500, color: '#4b5563'}}>Inpaint Range:</span>
+                                    <span style={{fontSize: '0.875rem', color: '#6b7280', marginLeft: '0.25rem'}}>
+                                      {file.mask_start}s - {file.mask_end}s
+                                    </span>
+                                  </div>
+                                )}
+                                {file.seed !== undefined && file.seed !== 0 && (
+                                  <div className="mb-1">
+                                    <span style={{fontSize: '0.875rem', fontWeight: 500, color: '#4b5563'}}>Seed:</span>
+                                    <span style={{fontSize: '0.875rem', color: '#6b7280', marginLeft: '0.25rem'}}>{file.seed}</span>
+                                  </div>
+                                )}
+                                {file.steps && (
+                                  <div>
+                                    <span style={{fontSize: '0.875rem', fontWeight: 500, color: '#4b5563'}}>Steps:</span>
+                                    <span style={{fontSize: '0.875rem', color: '#6b7280', marginLeft: '0.25rem'}}>{file.steps}</span>
                                   </div>
                                 )}
                               </div>
