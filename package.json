@@ -1,0 +1,19 @@
+{
+  "name": "sa2-audio-app",
+  "version": "1.0.0",
+  "description": "Stability Audio 2 UI Application",
+  "scripts": {
+    "dev": "concurrently \"npm run server:dev\" \"npm run client:dev\"",
+    "server:dev": "cd server && npm run dev",
+    "client:dev": "cd client && npm run dev",
+    "build": "cd client && npm run build",
+    "build:full": "npm run build && echo Build complete! Use 'npm start' to run the production version.",
+    "start": "cd server && cross-env NODE_ENV=production npm start",
+    "start:prod": "npm run build:full && npm start",
+    "install:all": "npm install && cd client && npm install && cd ../server && npm install"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2",
+    "cross-env": "^7.0.3"
+  }
+}
