@@ -2,6 +2,10 @@
 
 A local web application for generating high-quality audio using Stability AI's Stable Audio 2.5 model.
 
+Branch History:
+v1 = text to audio only
+v2 = audio to audio / text to audio only
+
 ## Features
 
 - Generate audio from text prompts
@@ -114,3 +118,4 @@ All generated audio files are stored locally in the `server/uploads/` directory 
 ---
 
 *Powered by Stability AI's Stable Audio 2.5*
+
