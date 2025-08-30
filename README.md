@@ -17,12 +17,19 @@ A local web application for generating and transforming high-quality audio using
 - Song-to-song transformations and audio style transfer
 - Preserve or completely transform original audio characteristics
 
+### Audio Inpainting
+- Replace specific time segments of existing audio files
+- Precise time range selection with mask start/end controls
+- Advanced parameters for fine control (seed, sampling steps)
+- Selective content replacement while preserving surrounding audio
+- Support for creative audio editing and restoration workflows
+
 ### Unified Gallery & Management
-- Tabbed interface for easy switching between T2A and A2A
-- Audio gallery with playback controls for both generation types
-- Type badges (T2A/A2A) to distinguish generation methods
-- Enhanced metadata display including transformation details
-- Local file storage with intelligent naming (audio_ and a2a_ prefixes)
+- Tabbed interface for easy switching between T2A, A2A, and Audio Inpainting
+- Audio gallery with playback controls for all generation types
+- Type badges (T2A/A2A/INP) to distinguish generation methods
+- Enhanced metadata display including transformation and inpainting details
+- Local file storage with intelligent naming (audio_, a2a_, and inpaint_ prefixes)
 - Download and playback functionality
 - Optimized production build
 
@@ -98,7 +105,7 @@ sa2-audio-app/
 
 ## Usage
 
-The application features a tabbed interface with two main modes:
+The application features a tabbed interface with three main modes:
 
 ### Text-to-Audio Generation
 1. Select the **"Text to Audio"** tab
@@ -126,12 +133,33 @@ The application features a tabbed interface with two main modes:
 7. Click "Transform Audio"
 8. View and play transformed files in the gallery below
 
+### Audio Inpainting
+1. Select the **"Audio Inpainting"** tab
+2. **Upload an audio file**:
+   - Click the upload area or drag and drop your file
+   - Supported formats: MP3, WAV
+   - File requirements: 6-190 seconds duration, max 50MB
+3. **Enter an inpainting description**:
+   - Example: "A solo violin melody" or "Ambient nature sounds"
+   - Describe what you want to replace in the selected time range
+4. **Set the inpainting time range**:
+   - **Start Time**: Beginning of the segment to replace (0-190 seconds)
+   - **End Time**: End of the segment to replace (0-190 seconds)
+   - Start time must be less than end time
+5. **Configure advanced parameters** (optional):
+   - **Seed**: Controls randomness (0 = random, 1-4294967294 for reproducible results)
+   - **Steps**: Sampling steps (4-8, higher = better quality but slower)
+6. Set the desired output duration (1-190 seconds)
+7. Choose output format (MP3 or WAV)
+8. Click "Inpaint Audio"
+9. View and play inpainted files in the gallery below
+
 ### Gallery Features
-- **Type Badges**: T2A (Text-to-Audio) and A2A (Audio-to-Audio) labels
+- **Type Badges**: T2A (Text-to-Audio), A2A (Audio-to-Audio), and INP (Audio Inpainting) labels
 - **Metadata Display**: Shows prompts, transformation details, duration, and format
 - **Audio Playback**: Click play/pause buttons to preview audio
 - **Download**: Download any generated file to your computer
-- **Source Information**: For A2A files, shows original filename and transformation strength
+- **Source Information**: For A2A and INP files, shows original filename and generation parameters
 
 ## Generated Files
 
@@ -140,6 +168,7 @@ All generated audio files are stored locally in the `server/uploads/` directory 
 ### File Naming Convention
 - **Text-to-Audio**: `audio_[timestamp].[format]` (e.g., `audio_1756521412164.mp3`)
 - **Audio-to-Audio**: `a2a_[timestamp].[format]` (e.g., `a2a_1756557198932.mp3`)
+- **Audio Inpainting**: `inpaint_[timestamp].[format]` (e.g., `inpaint_1756567794449.mp3`)
 - **Metadata**: Each audio file has a companion `.txt` file with generation details
 
 ### File Management
@@ -162,6 +191,11 @@ The application provides the following REST API endpoints:
 - **Content-Type**: `multipart/form-data`
 - **Fields**: `prompt, audio (file), duration, output_format, strength, model`
 
+### Audio Inpainting
+- **POST** `/api/audio/generate-inpaint`
+- **Content-Type**: `multipart/form-data`
+- **Fields**: `prompt, audio (file), duration, output_format, mask_start, mask_end, seed, steps, model`
+
 ### File Management
 - **GET** `/api/audio/files` - List all generated files with metadata
 - **GET** `/api/audio/download/[filename]` - Download specific file
@@ -179,6 +213,14 @@ The application provides the following REST API endpoints:
 - **Duration Validation**: Audio files must be at least 6 seconds and no longer than 190 seconds.
 - **Playback Issues**: If A2A files won't play, ensure both frontend and backend servers are running.
 - **Transformation Quality**: Adjust the strength parameter - lower values preserve more original characteristics.
+
+### Audio Inpainting Specific Issues
+- **Time Range Validation**: Ensure start time is less than end time and both are within the audio file duration.
+- **Mask Parameters**: Start and end times must be between 0 and 190 seconds.
+- **Seed Values**: Seed must be between 0 and 4294967294 (0 for random generation).
+- **Steps Parameter**: Sampling steps must be between 4 and 8 (higher values improve quality but increase processing time).
+- **File Requirements**: Same as A2A - MP3/WAV format, 6-190 seconds duration, max 50MB.
+- **Processing Time**: Inpainting may take longer than other generation types due to advanced processing.
 
 ## Development Scripts
 
